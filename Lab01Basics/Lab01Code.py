@@ -34,10 +34,13 @@ def encrypt_message(K, message):
     """ Encrypt a message under a key K """
 
     plaintext = message.encode("utf8")
-    
+    iv = urandom(16)
+    aes = Cipher("aes-128-gcm")
+    ciphertext, tag = aes.quick_gcm_enc(K, iv, plaintext)
     ## YOUR CODE HERE
 
     return (iv, ciphertext, tag)
+
 
 def decrypt_message(K, iv, ciphertext, tag):
     """ Decrypt a cipher text under a key K 
@@ -45,7 +48,8 @@ def decrypt_message(K, iv, ciphertext, tag):
         In case the decryption fails, throw an exception.
     """
     ## YOUR CODE HERE
-
+    aes = Cipher("aes-128-gcm")
+    plain = aes.quick_gcm_dec(K, iv, ciphertext, tag)
     return plain.encode("utf8")
 
 #####################################################
@@ -76,9 +80,9 @@ def is_point_on_curve(a, b, p, x, y):
     assert isinstance(b, Bn)
     assert isinstance(p, Bn) and p > 0
     assert (isinstance(x, Bn) and isinstance(y, Bn)) \
-           or (x == None and y == None)
+           or (x is None and y is None)
 
-    if x == None and y == None:
+    if x is None and y is None:
         return True
 
     lhs = (y * y) % p
@@ -101,8 +105,36 @@ def point_add(a, b, p, x0, y0, x1, y1):
     """
 
     # ADD YOUR CODE BELOW
-    xr, yr = None, None
-    
+    if (str(x0) == str(x1)) and (str(y0) == str(y1)):
+        raise Exception("EC Points must not be equal")
+    if (
+        (str(x0) == str(x1)) or \
+        (not is_point_on_curve(a, b, p, x0, y0) or \
+          not is_point_on_curve(a, b, p, x1, y1))):
+        return (None, None)
+
+    if x0 is None and y0 is None:
+        return (x1, y1)
+
+    if x1 is None and y1 is None:
+        return (x0, y0)
+
+    # calculate lam in stages using Bn methods
+    xqminxp = x1.mod_sub(x0, p)
+    yqminyp = y1.mod_sub(y0, p)
+
+    xqminxpmodinv = xqminxp.mod_inverse(m=p)
+    lam = xqminxpmodinv.mod_mul(yqminyp, p)
+
+    # calculate xr
+    lamsq = lam.mod_mul(lam, p)
+    lamsqmin = lamsq.mod_sub(x0, p)
+    xr = lamsqmin.mod_sub(x1, p)
+
+    # calculate yr
+    xpminxr = x0.mod_sub(xr, p)
+    lamxpxr = lam.mod_mul(xpminxr, p)
+    yr = lamxpxr.mod_sub(y0, p)
     return (xr, yr)
 
 def point_double(a, b, p, x, y):
@@ -118,6 +150,26 @@ def point_double(a, b, p, x, y):
     """  
 
     # ADD YOUR CODE BELOW
+    if x is None and y is None:
+        return None, None
+
+    xsq = x.mod_mul(x, p)
+    xsq3 = Bn(3).mod_mul(xsq, p)
+    num = xsq3.mod_add(a, p)
+    y2 = Bn(2).mod_mul(y, p)
+    y2inv = y2.mod_inverse(m=p)
+    lam = num.mod_mul(y2inv, p)
+
+    xr = lam.mod_mul(lam, p)
+    xr = xr.mod_sub(x, p)
+    xr = xr.mod_sub(x, p)
+
+    yr = lam.mod_mul(x.mod_sub(xr, p), p)
+    yr = yr.mod_sub(y, p)
+
+    return (xr, yr)
+    
+
     xr, yr = None, None
 
     return xr, yr
@@ -138,9 +190,12 @@ def point_scalar_multiplication_double_and_add(a, b, p, x, y, scalar):
     """
     Q = (None, None)
     P = (x, y)
-
+    binary = bin(scalar)
     for i in range(scalar.num_bits()):
-        pass ## ADD YOUR CODE HERE
+        if binary[scalar.num_bits() - i + 1] == '1':
+            Q = point_add(a, b, p, Q[0], Q[1], P[0], P[1])
+
+        P = point_double(a, b, p, P[0], P[1])
 
     return Q
 
@@ -164,9 +219,15 @@ def point_scalar_multiplication_montgomerry_ladder(a, b, p, x, y, scalar):
     """
     R0 = (None, None)
     R1 = (x, y)
-
+    binary = bin(scalar)
     for i in reversed(range(0,scalar.num_bits())):
-        pass ## ADD YOUR CODE HERE
+        if binary[scalar.num_bits() - i + 1] == '0':
+            R1 = point_add(a, b, p, R0[0], R0[1], R1[0], R1[1])
+            R0 = point_double(a, b, p, R0[0], R0[1])
+        # if bit is not zero then do the addition and double R1
+        else:
+            R0 = point_add(a, b, p, R0[0], R0[1], R1[0], R1[1])
+            R1 = point_double(a, b, p, R1[0], R1[1])
 
     return R0
 
@@ -197,6 +258,7 @@ def ecdsa_sign(G, priv_sign, message):
     plaintext =  message.encode("utf8")
 
     ## YOUR CODE HERE
+    sig = do_ecdsa_sign(G, priv_sign, plaintext)
 
     return sig
 
@@ -205,6 +267,7 @@ def ecdsa_verify(G, pub_verify, message, sig):
     plaintext =  message.encode("utf8")
 
     ## YOUR CODE HERE
+    res = do_ecdsa_verify(G, pub_verify, sig, plaintext)
 
     return res
 
@@ -232,28 +295,45 @@ def dh_encrypt(pub, message, aliceSig = None):
         - Use the shared key to AES_GCM encrypt the message.
         - Optionally: sign the message with Alice's key.
     """
-    
-    ## YOUR CODE HERE
-    pass
+    (G, priv_dec, pub_enc) = dh_get_key()
+    shared_key = pub.pt_mul(priv_dec).export()
+    hashed_shared_key = sha256(shared_key).digest()
+    iv = urandom(16)
+    aes = Cipher("aes-128-gcm")
+    ciphertext, tag = aes.quick_gcm_enc(hashed_shared_key[:16], iv, message.encode("utf-8"))
+    return (iv, ciphertext, tag, pub_enc)
 
 def dh_decrypt(priv, ciphertext, aliceVer = None):
     """ Decrypt a received message encrypted using your public key, 
     of which the private key is provided. Optionally verify 
     the message came from Alice using her verification key."""
-    
-    ## YOUR CODE HERE
-    pass
+    iv, enc_msg, tag, pub_enc = ciphertext
+    shared_key = pub_enc.pt_mul(priv).export()
+    hashed_shared_key = sha256(shared_key).digest()
+    aes = Cipher("aes-128-gcm")
+    plaintext = aes.quick_gcm_dec(hashed_shared_key[:16], iv, enc_msg, tag).encode("utf-8")
+    return plaintext
 
 ## NOTE: populate those (or more) tests
 #  ensure they run using the "py.test filename" command.
 #  What is your test coverage? Where is it missing cases?
 #  $ py.test-2.7 --cov-report html --cov Lab01Code Lab01Code.py 
 
+(G, priv, pub) = dh_get_key()
+
 def test_encrypt():
-    assert False
+    message = u"Hello"
+    (iv, ciphertext, tag, pub_enc) = dh_encrypt(pub, message, aliceSig=None)
+    assert len(iv) == 16
+    assert len(ciphertext) == len(message)
+    assert len(tag) == 16
+    
 
 def test_decrypt():
-    assert False
+    message = u"Hello"
+    ciphertext = dh_encrypt(pub, message, aliceSig=None)
+    plaintext = dh_decrypt(priv, ciphertext, aliceVer=None)
+    assert plaintext == message
 
 def test_fails():
     assert False
