@@ -132,6 +132,26 @@ def mix_client_one_hop(public_key, address, message):
     private_key = G.order().random()
     client_public_key  = private_key * G.generator()
 
+    # derive keying material
+    shared_element = private_key * public_key
+    key_material = sha512(shared_element.export()).digest()
+    hmac_key = key_material[:16]
+    address_key = key_material[16:32]
+    message_key = key_material[32:48]
+
+    # use a fixed iv
+    iv = b"\x00"*16
+
+    # encrypt the address and the message
+    address_cipher = aes_ctr_enc_dec(address_key, iv, address_plaintext)
+    message_cipher = aes_ctr_enc_dec(message_key, iv, message_plaintext)
+
+    # generate the HMAC
+    h = Hmac(b"sha512", hmac_key)
+    h.update(address_cipher)
+    h.update(message_cipher)
+    expected_mac = h.digest()[:20]
+
     ## ADD CODE HERE
 
     return OneHopMixMessage(client_public_key, expected_mac, address_cipher, message_cipher)
@@ -257,9 +277,63 @@ def mix_client_n_hop(public_keys, address, message):
     address_plaintext = pack("!H256s", len(address), address)
     message_plaintext = pack("!H1000s", len(message), message)
 
-    ## Generate a fresh public key
+    # Generate a fresh public key
     private_key = G.order().random()
     client_public_key  = private_key * G.generator()
+    hmacs = []
+    blinding_factor = Bn(1)
+    new_pub_keys = []
+
+    # Get a list of new blinded public keys
+    counter = 0
+    for key in public_keys:
+        if counter == 0:
+            new_pub_keys.append(key)
+        else:
+            shared_element = private_key * new_pub_keys[-1]
+            shared_key = sha512(shared_element.export()).digest()
+            blinding_factor *= Bn.from_binary(shared_key[48:])
+            new_key = blinding_factor * key
+            new_pub_keys.append(new_key)
+        counter += 1
+
+    #reverse the list as you start encrypting from last hop       
+    new_pub_keys.reverse()
+    address_cipher = address_plaintext
+    message_cipher = message_plaintext
+
+    for pub_key in new_pub_keys:
+        # Generate Keying Material
+        new_shared_material = private_key * pub_key
+        new_shared_key = sha512(new_shared_material.export()).digest()
+
+        # Calculate Other Keys
+        hmac_key = new_shared_key[:16]
+        address_key = new_shared_key[16:32]
+        message_key = new_shared_key[32:48]
+
+        iv = b"\x00"*16
+        address_cipher = aes_ctr_enc_dec(address_key, iv, address_cipher)
+        message_cipher = aes_ctr_enc_dec(message_key, iv, message_cipher)
+
+        decrypted_hmacs = []
+        h = Hmac(b"sha512", hmac_key)
+
+        # Decrypt HMACs and update them
+        for i,other_hmac in enumerate(hmacs):
+            hmac_iv = pack("H14s", i, b"\x00"*14)
+            decrypted_hmac = aes_ctr_enc_dec(hmac_key, hmac_iv, other_hmac)
+            h.update(decrypted_hmac)
+            decrypted_hmacs.append(decrypted_hmac)
+
+        # Update HMAC of message and cipher     
+        h.update(address_cipher)
+        h.update(message_cipher)
+        expected_hmac = h.digest()[:20]
+
+        # Add new HMACs to list
+
+        hmacs = [expected_hmac] + decrypted_hmacs
 
     ## ADD CODE HERE
 
@@ -310,20 +384,39 @@ def analyze_trace(trace, target_number_of_friends, target=0):
     return the list of receiver identifiers that are the most likely 
     friends of the target.
     """
+    # print("target no of friends is ", str(target_number_of_friends))
+    # print(trace)
+    list_alice_sent = []
+    final_list = []
+    # Generate List containing messages sent by alice
+    for data in trace:
+        senders = data[0]
+        receivers = data[1]
+        if target in senders:
+            list_alice_sent += receivers
+    counts = Counter(list_alice_sent)
+    # print(counts)
+    # print(counts.most_common(target_number_of_friends))
 
-    ## ADD CODE HERE
-
-    return []
+    # Count most common receipents
+    most_common = counts.most_common(target_number_of_friends)
+    for common in most_common:
+        final_list.append(common[0])
+    # print(final_list)
+    return final_list
 
 ## TASK Q1 (Question 1): The mix packet format you worked on uses AES-CTR with an IV set to all zeros. 
 #                        Explain whether this is a security concern and justify your answer.
 
-""" TODO: Your answer HERE """
+""" TODO: In this case we're making the assumption that every time the AES-CTR is used, it is used with a different key. So even if the IV is set to all zeros, an attack would not be able to
+decrypt the ciphertext because they do not have they key. Therefore it is not a security concern. """
 
 
 ## TASK Q2 (Question 2): What assumptions does your implementation of the Statistical Disclosure Attack 
 #                        makes about the distribution of traffic from non-target senders to receivers? Is
 #                        the correctness of the result returned dependent on this background distribution?
 
-""" TODO: Your answer HERE """
+""" TODO: The assumptions that we make here are that other senders and the target sender choose the recipients of their messages independent from each other. The correctness of 
+the model is dependent on this distribution because it tries to identify the recipients based on the set that includes that receiver of the target senders message. Without this, we would
+not be able to identify that most likely targets, as these targets may also be recipients from senders that are not the target sender. """
 
