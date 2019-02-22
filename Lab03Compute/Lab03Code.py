@@ -103,6 +103,10 @@ def add(params, pub, c1, c2):
     assert isCiphertext(params, c1)
     assert isCiphertext(params, c2)
 
+    (a0, b0) = c1
+    (a1, b1) = c2
+    c3 = (a0 + a1, b0 + b1)
+
    # ADD CODE HERE
 
     return c3
@@ -111,7 +115,8 @@ def mul(params, pub, c1, alpha):
     """ Given a ciphertext compute the ciphertext of the 
         product of the plaintext time alpha """
     assert isCiphertext(params, c1)
-
+    (a, b) = c1
+    c3 = (alpha * a, alpha * b)
    # ADD CODE HERE
 
     return c3
@@ -124,6 +129,12 @@ def mul(params, pub, c1, alpha):
 def groupKey(params, pubKeys=[]):
     """ Generate a group public key from a list of public keys """
     (G, g, h, o) = params
+    pub = None
+    for key in pubKeys:
+        if pub is None:
+            pub = key
+        else:
+            pub += key
 
    # ADD CODE HERE
 
@@ -134,6 +145,8 @@ def partialDecrypt(params, priv, ciphertext, final=False):
         If final is True, then return the plaintext. """
     assert isCiphertext(params, ciphertext)
     
+    (a1, b) = ciphertext
+    b1 = b - (priv * a1)
     # ADD CODE HERE
 
     if final:
@@ -153,6 +166,9 @@ def corruptPubKey(params, priv, OtherPubKeys=[]):
         public key corresponding to a private key known to the
         corrupt authority. """
     (G, g, h, o) = params
+    pub = priv * g
+    for key in OtherPubKeys:
+        pub -= key
     
    # ADD CODE HERE
 
@@ -168,6 +184,9 @@ def encode_vote(params, pub, vote):
         ciphertexts representing the count of votes for
         zero and the votes for one."""
     assert vote in [0, 1]
+    (G, g, h, o) = params
+    v0 = encrypt(params, pub, 1 - vote)
+    v1 = encrypt(params, pub, vote)
 
    # ADD CODE HERE
 
@@ -177,7 +196,11 @@ def process_votes(params, pub, encrypted_votes):
     """ Given a list of encrypted votes tally them
         to sum votes for zeros and votes for ones. """
     assert isinstance(encrypted_votes, list)
-    
+    (G, g, h, o) = params
+    (tv0, tv1) = encrypted_votes[0]
+    for (t0, t1) in encrypted_votes[1:]:
+        tv0 = add(params, pub, t0, tv0)
+        tv1 = add(params, pub, t1, tv1)
    # ADD CODE HERE
 
     return tv0, tv1
