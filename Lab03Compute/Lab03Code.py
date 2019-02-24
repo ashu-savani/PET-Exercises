@@ -40,19 +40,12 @@ def encrypt(params, pub, m):
     """ Encrypt a message under the public key """
     if not -100 < m < 100:
         raise Exception("Message value to low or high.")
-    # (G, g, h, o) = params
-    # k = o.random()
-    # g_pow_k = g.pt_mul(k)
-    # h_pow_m = h.pt_mul(m)
-    # k_pow_b = pub.pt_mul(k)
-    # final = k_pow_b.pt_add(h_pow_m)
-    # c = (g_pow_k, final)
     (G, g, h, o) = params
+    # generate a random k
     k = o.random()
     g_pow_k = k * g
-    new_key = k * pub + m * h
-    c = (g_pow_k, new_key)
-   # ADD CODE HERE
+    message = k * pub + m * h
+    c = (g_pow_k, message)
     return c
 
 def isCiphertext(params, ciphertext):
@@ -87,8 +80,6 @@ def decrypt(params, priv, ciphertext):
     a , b = ciphertext
     (G, g, h, o) = params
     hm = b + (-priv * a)
-   # ADD CODE HERE
-
     return logh(params, hm)
 
 #####################################################
@@ -252,7 +243,10 @@ def simulate_poll(votes):
 # What is the advantage of the adversary in guessing b given your implementation of 
 # Homomorphic addition? What are the security implications of this?
 
-""" Your Answer here """
+""" The adversay would be able to guess b correctly almost all the time. This is because 
+since the adversary has Ca, Cb, and Cc, he can use these values to calculate Ca plus Cb and Cb plus Cc.
+This is because to calculate Pa plus Pb, you carry out additive homomorphism. This would mean that attacker
+can uncover values that have been added homomorphically. """
 
 ###########################################################
 # TASK Q2 -- Answer questions regarding your implementation
@@ -263,4 +257,9 @@ def simulate_poll(votes):
 # that it yields an arbitrary result. Can those malicious actions 
 # be detected given your implementation?
 
-""" Your Answer here """
+"""
+a) a user could not use the votes/input at all in the encode_vote function so that it does not return any encrypted vote results
+b) a user would be able to either add or remove votes therefore the output would be the wrong number of encrypted votes 
+
+These actions cannot be detected in the implementation because the function has no way of verifying/validating the inputs that are passed so they can be modified.
+"""
