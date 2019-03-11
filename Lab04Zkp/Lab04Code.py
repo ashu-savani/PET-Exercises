@@ -50,7 +50,11 @@ def proveKey(params, priv, pub):
                  r (the response)
     """  
     (G, g, hs, o) = params
-    
+    w = o.random()
+    witness = w * g
+    list_param = [g, witness]
+    c = to_challenge(list_param)
+    r = (w - c * priv) % o
     ## YOUR CODE HERE:
     
     return (c, r)
@@ -90,7 +94,18 @@ def proveCommitment(params, C, r, secrets):
     """
     (G, g, (h0, h1, h2, h3), o) = params
     x0, x1, x2, x3 = secrets
-
+    w_values = []
+    for i in range(5):
+        w_values.append(o.random())
+    witness = w_values[0] * g + w_values[1] * h0 + w_values[2] * h1 + w_values[3] * h2 + w_values[4] * h3
+    list_params = [g, h0, h1, h2, h3, witness]
+    c = to_challenge(list_params)
+    r1 = (w_values[0] - (c * r)) % o
+    r2 = (w_values[1] - (c * x0)) % o
+    r3 = (w_values[2] - (c * x1)) % o
+    r4 = (w_values[3] - (c * x2)) % o
+    r5 = (w_values[4] - (c * x3)) % o
+    responses = (r2, r3, r4, r5, r1)
     ## YOUR CODE HERE:
 
     return (c, responses)
@@ -137,10 +152,14 @@ def verifyDLEquality(params, K, L, proof):
     """ Return whether the verification of equality of two discrete logarithms succeeded. """ 
     (G, g, (h0, h1, h2, h3), o) = params
     c, r = proof
-
-    ## YOUR CODE HERE:
-
-    return # YOUR RETURN HERE
+    g_mul_p = (r * g) + (c * K)
+    h_mul_p = (r * h0) + (c * L) 
+    list_params = [g, h0, g_mul_p, h_mul_p]
+    new_challenge = to_challenge(list_params)
+    if c == new_challenge:
+        return True
+    else:
+        return False
 
 #####################################################
 # TASK 4 -- Prove correct encryption and knowledge of 
@@ -162,9 +181,14 @@ def proveEnc(params, pub, Ciphertext, k, m):
     """ 
     (G, g, (h0, h1, h2, h3), o) = params
     a, b = Ciphertext
-
-    ## YOUR CODE HERE:
-
+    wit_key = o.random()
+    wit_msg = o.random()
+    wit_a = wit_key * g
+    wit_b = (wit_key * pub + wit_msg * h0)
+    list_params = [g, h0, pub, a, b, wit_a, wit_b]
+    c = to_challenge(list_params)
+    rk = (wit_key - (c * k)) % o
+    rm = (wit_msg - (c * m)) % o
     return (c, (rk, rm))
 
 def verifyEnc(params, pub, Ciphertext, proof):
@@ -173,10 +197,14 @@ def verifyEnc(params, pub, Ciphertext, proof):
     a, b = Ciphertext    
     (c, (rk, rm)) = proof
 
-    ## YOUR CODE HERE:
-
-    return ## YOUR RETURN HERE
-
+    w1 = rk * g + c * a
+    w2 = rk * pub + rm * h0 + c * b
+    list_params = [g, h0, pub, a, b, w1, w2]
+    new_challenge_val = to_challenge(list_params)
+    if c == new_challenge_val:
+        return True ## YOUR RETURN HERE
+    else:
+        return False
 
 #####################################################
 # TASK 5 -- Prove a linear relation
@@ -198,18 +226,33 @@ def prove_x0eq10x1plus20(params, C, x0, x1, r):
     """ Prove C is a commitment to x0 and x1 and that x0 = 10 x1 + 20. """
     (G, g, (h0, h1, h2, h3), o) = params
 
-    ## YOUR CODE HERE:
+    # YOUR CODE HERE:
+    r_wit = o.random()
+    x1_wit = o.random()
 
-    return ## YOUR RETURN HERE
+    final_wit = r_wit * g + x1_wit * h1 + (10 * x1_wit) * h0
+    list_params = [g, h0, h1, final_wit]
+    challenge_val = to_challenge(list_params)
+
+    r1 = (r_wit - challenge_val * r) % o
+    r2 = (x1_wit - challenge_val * x1) % o
+    
+    return (challenge_val, (r1, r2))
+
 
 def verify_x0eq10x1plus20(params, C, proof):
     """ Verify that proof of knowledge of C and x0 = 10 x1 + 20. """
     (G, g, (h0, h1, h2, h3), o) = params
-
+    (challenge_val, (r1, r2)) = proof
+    subtraction = challenge_val * (C - 20 * h0)
+    witness = r1 * g + r2 * h1 + (10 * r2) * h0 + subtraction
+    list_params = [g, h0 ,h1, witness]
+    new_challenge =  to_challenge(list_params)
     ## YOUR CODE HERE:
-
-    return ## YOUR RETURN HERE
-
+    if new_challenge == challenge_val:
+        return True ## YOUR RETURN HERE
+    else:
+        return False
 #####################################################
 # TASK 6 -- (OPTIONAL) Prove that a ciphertext is either 0 or 1
 
@@ -253,7 +296,13 @@ def test_bin_incorrect():
 # that  deviates from the Schnorr identification protocol? Justify 
 # your answer by describing what a dishonest verifier may do.
 
-""" TODO: Your answer here. """
+""" 
+Plausible deniability does not hold against a dishonest verifier. A large part of of plausible deniability depends on the 
+random challenge that is issued; a dishonest verifier can essentially send a value linked/dependent to the witness provided by the prover
+instead of something random. This operation could be doing something like hashing the witness or doing another verifiable operation on it. When the 
+dishonest verifier does this and send its to the prover they would have a copy of the transcript. Because the operation like hashing is verifiable, 
+when sent to a third party, the third party can check this operation which shows plausible deniability does not hold.
+"""
 
 #####################################################
 # TASK Q2 - Answer the following question:
@@ -266,7 +315,12 @@ def test_bin_incorrect():
 #
 # Hint: Look at "test_prove_something" too.
 
-""" TODO: Your answer here. """
+""" 
+ The verifier is essentially convinced of the fact that the prover either knows x or y, and not both values. To ensure
+ that the equation C = c1 + c2 is satisfied by the verifier, both c1 and c2 have to be valid. While the correctness of 
+ both these values can show that proof ox x and y, in this case, it is used to show the existence of either x or y because 
+ c1 or c2 can be constructed by subtracting the other value from C.
+"""
 
 def prove_something(params, KX, KY, y):
     (G, g, _, o) = params
